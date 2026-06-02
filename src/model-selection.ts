@@ -1,5 +1,6 @@
 import type { ExtensionContext, Theme } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { matchesKey } from "@oh-my-pi/pi-tui";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui";
 
 export interface ModelItem {
@@ -70,18 +71,18 @@ export async function multiSelectModels(
             return lines;
           },
           handleInput(key: string) {
-            if (key === "up") {
+            if (matchesKey(key, "up")) {
               cursor = cursor > 0 ? cursor - 1 : items.length - 1;
-            } else if (key === "down") {
+            } else if (matchesKey(key, "down")) {
               cursor = cursor < items.length - 1 ? cursor + 1 : 0;
-            } else if (key === "space") {
+            } else if (matchesKey(key, "space")) {
               if (selected.has(cursor)) selected.delete(cursor);
               else selected.add(cursor);
-            } else if (key === "return") {
+            } else if (matchesKey(key, "enter") || matchesKey(key, "return") || key === "\n") {
               if (selected.size >= 2) {
                 done(Array.from(selected).map((i) => items[i].value));
               }
-            } else if (key === "escape") {
+            } else if (matchesKey(key, "escape") || matchesKey(key, "ctrl+c")) {
               done(null);
             }
           },
