@@ -1,0 +1,25 @@
+{
+  "name": "omp-octopus-lite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "omp": {
+    "extensions": [
+      "./src/main.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "^15.8.0",
+    "@oh-my-pi/pi-tui": "^15.8.0"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "^15.8.0",
+    "@oh-my-pi/pi-tui": "^15.8.0",
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}
