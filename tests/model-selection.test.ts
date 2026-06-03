@@ -127,4 +127,69 @@ describe("multiSelectModels", () => {
 		capture.component!.handleInput!("\x03");
 		await promise;
 	});
+	it("filters with typed query and preserves selections when clearing filter", async () => {
+		const capture: Capture = { component: null, resolve: null };
+		const ctx = createStubContext(capture);
+		const promise = multiSelectModels(items, new Set(), ctx);
+
+		// Type "B" to filter to Model B only.
+		capture.component!.handleInput!("B");
+
+		// Select the filtered model.
+		capture.component!.handleInput!(" ");
+
+		// Clear the filter with backspace.
+		capture.component!.handleInput!("\x7f");
+
+		// Move down twice to Model C and select it.
+		capture.component!.handleInput!("\x1b[B");
+		capture.component!.handleInput!("\x1b[B");
+		capture.component!.handleInput!(" ");
+
+		// Confirm.
+		capture.component!.handleInput!("\r");
+
+		const result = await promise;
+		expect(result).toEqual(["c/d", "e/f"]);
+	});
+
+	it("shows no matches for a non-matching query and restores matches on backspace", async () => {
+		const capture: Capture = { component: null, resolve: null };
+		const ctx = createStubContext(capture);
+		const promise = multiSelectModels(items, new Set(), ctx);
+
+		capture.component!.handleInput!("XYZ");
+		const noMatchLines = capture.component!.render!(80);
+		expect(noMatchLines.some((line) => line.includes("No matches."))).toBe(true);
+
+		capture.component!.handleInput!("\x7f");
+		capture.component!.handleInput!("\x7f");
+		capture.component!.handleInput!("\x7f");
+		const restoredLines = capture.component!.render!(80);
+		expect(restoredLines.some((line) => line.includes("Model A"))).toBe(true);
+		expect(restoredLines.some((line) => line.includes("Model B"))).toBe(true);
+		expect(restoredLines.some((line) => line.includes("Model C"))).toBe(true);
+
+		// Cancel to avoid dangling promise.
+		capture.component!.handleInput!("\x03");
+		await promise;
+	});
+
+	it("keeps preselected models selected even when filtered out", async () => {
+		const capture: Capture = { component: null, resolve: null };
+		const ctx = createStubContext(capture);
+		const promise = multiSelectModels(items, new Set(["a/b", "e/f"]), ctx);
+
+		// Filter to only Model B; preselected models A and C are hidden.
+		capture.component!.handleInput!("B");
+
+		// Select Model B so we have 3 total selections.
+		capture.component!.handleInput!(" ");
+
+		// Confirm should include the hidden preselected models.
+		capture.component!.handleInput!("\r");
+
+		const result = await promise;
+		expect(result).toEqual(["a/b", "e/f", "c/d"]);
+	});
 });
