@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildParticipantPrompt,
+  buildResearchParticipantPrompt,
   deduplicateParticipants,
   sanitizeErrorMessage,
   validateModelSelector,
@@ -35,6 +36,38 @@ describe("buildParticipantPrompt", () => {
 
     expect(prompt).toContain("Role: Implementer");
     expect(prompt).toContain("Shared prompt");
+  });
+});
+
+describe("buildResearchParticipantPrompt", () => {
+  it("requires citations, attribution, and read-only behavior", () => {
+    const prompt = buildResearchParticipantPrompt(
+      { model: "openai/gpt-4", role: "Primary source reviewer", prompt: "Research X" },
+      "Shared research",
+      "deep",
+    );
+
+    expect(prompt).toContain("Role: Primary source reviewer");
+    expect(prompt).toContain("Research X");
+    expect(prompt).toContain("Research intensity: deep");
+    expect(prompt).toContain("web_search and read");
+    expect(prompt).toContain("Do not write files");
+    expect(prompt).toContain("execute shell commands");
+    expect(prompt).toContain("Cite source URLs");
+    expect(prompt).toContain("[Inference]");
+    expect(prompt).toContain("provider opinion");
+    expect(prompt).toContain("Disagreements & Gaps");
+  });
+
+  it("uses the shared research prompt when no participant prompt is provided", () => {
+    const prompt = buildResearchParticipantPrompt(
+      { model: "openai/gpt-4", role: "Gap finder" },
+      "Shared research",
+      "quick",
+    );
+
+    expect(prompt).toContain("Role: Gap finder");
+    expect(prompt).toContain("Shared research");
   });
 });
 

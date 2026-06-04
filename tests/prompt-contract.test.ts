@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { orchestratorKickoffPrompt } from "../src/prompts";
+import { orchestratorKickoffPrompt, researchOrchestratorPrompt } from "../src/prompts";
 
 describe("orchestratorKickoffPrompt", () => {
   it("contains mode and topic", () => {
@@ -49,5 +49,41 @@ describe("orchestratorKickoffPrompt", () => {
     });
     expect(prompt).toContain("priorSummary");
     expect(prompt).toContain("configured round limit is 2");
+  });
+});
+
+describe("researchOrchestratorPrompt", () => {
+  it("contains research tool contract and mandatory sections", () => {
+    const prompt = researchOrchestratorPrompt({
+      topic: "AI in radiology",
+      selectedModels: ["openai/gpt-5", "anthropic/claude-sonnet"],
+      intensity: "deep",
+    });
+
+    expect(prompt).toContain("AI in radiology");
+    expect(prompt).toContain("openai/gpt-5");
+    expect(prompt).toContain("anthropic/claude-sonnet");
+    expect(prompt).toContain("deep");
+    expect(prompt).toContain("octopus_research_round");
+    expect(prompt).toContain("exactly once");
+    expect(prompt).toContain("🐙 Octopus Research");
+    expect(prompt).toContain("## Executive Summary");
+    expect(prompt).toContain("## Key Themes");
+    expect(prompt).toContain("## Key Takeaways");
+    expect(prompt).toContain("## Sources & Attribution");
+    expect(prompt).toContain("## Methodology");
+  });
+
+  it("requires source attribution and gap reporting", () => {
+    const prompt = researchOrchestratorPrompt({
+      topic: "X",
+      selectedModels: ["a/b", "c/d"],
+      intensity: "standard",
+    });
+
+    expect(prompt).toContain("source-backed findings");
+    expect(prompt).toContain("[Inference]");
+    expect(prompt).toContain("provider opinion");
+    expect(prompt).toContain("evidence gaps");
   });
 });

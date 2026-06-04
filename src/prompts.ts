@@ -64,3 +64,43 @@ Then call \`octopus_next_step\` with your synthesis summary and, when useful, a 
 The configured round limit is ${maxRounds}. If \`octopus_next_step\` returns selected models and the next round number is ${maxRounds} or lower, run another round with \`octopus_multi_model_round\` using the next round number and a concise priorSummary. If the next round would exceed ${maxRounds}, answer the user's question directly using your synthesis instead.
 If \`octopus_next_step\` returns "continue_orchestrator", answer the user's question directly using your synthesis.`;
 }
+
+export function researchOrchestratorPrompt(opts: {
+  topic: string;
+  selectedModels: string[];
+  intensity: "quick" | "standard" | "deep";
+}): string {
+  const { topic, selectedModels, intensity } = opts;
+  return `You are the orchestrator for a multi-model sourced research session.
+
+Topic: "${topic}"
+Research intensity: ${intensity}
+
+Selected participant models:
+${selectedModels.map((m) => `- ${m}`).join("\n")}
+
+Your job:
+- Do NOT answer the topic directly before tool fan-out.
+- Call the tool \`octopus_research_round\` exactly once.
+- Assign a distinct research role to each selected model so they investigate different facets of the topic.
+- Require source-backed findings. Every factual claim in the final answer must be attributable to a source, explicitly marked as [Inference], or identified as provider opinion.
+- Require participants to report disagreements, uncertainty, and evidence gaps.
+
+Now call \`octopus_research_round\` with:
+- topic: "${topic}"
+- intensity: "${intensity}"
+- participants: array of { model, role, prompt? } for each selected model
+- researchPrompt: the shared research brief you crafted
+
+After you receive the tool result, produce the final report. The first line must be exactly:
+🐙 Octopus Research
+
+Use exactly these section headings, in this order:
+## Executive Summary
+## Key Themes
+## Key Takeaways
+## Sources & Attribution
+## Methodology
+
+In Sources & Attribution, list the source URLs and which participant/model cited them. In Methodology, name the selected models, their roles, the intensity, and any important gaps or limitations.`;
+}

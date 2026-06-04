@@ -26,6 +26,10 @@ export interface RoundOptions {
   maxChars?: number;
 }
 
+export interface ResearchRoundOptions {
+  maxChars?: number;
+}
+
 const DEFAULT_MAX_CHARS = 4000;
 const SECRET_REPLACEMENT = "[REDACTED]";
 
@@ -112,6 +116,110 @@ export async function runMultiModelRound(
   });
 
   return Promise.all(promises);
+}
+
+export async function runResearchRound(
+  participants: Participant[],
+  researchPrompt: string,
+  intensity: "quick" | "standard" | "deep",
+  modelRegistry: ModelRegistry,
+  authStorage: AuthStorage,
+  signal: AbortSignal | undefined,
+  options: ResearchRoundOptions = {},
+): Promise<RoundResult[]> {
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  const uniqueParticipants = deduplicateParticipants(participants);
+  for (const participant of uniqueParticipants) {
+    validateModelSelector(participant.model);
+  }
+
+  const promises = uniqueParticipants.map(async (p): Promise<RoundResult> => {
+    const result: RoundResult = { model: p.model, role: p.role, text: "" };
+    try {
+      const model = modelRegistry.find(...parseSelector(p.model));
+      if (!model) {
+        throw new Error(`Model not found: ${p.model}`);
+      }
+
+      const { session } = await createAgentSession({
+        sessionManager: SessionManager.inMemory(),
+        modelRegistry,
+        authStorage,
+        disableExtensionDiscovery: true,
+        enableMCP: false,
+        enableLsp: false,
+        toolNames: ["web_search", "read"],
+        skills: [],
+        rules: [],
+        contextFiles: [],
+        promptTemplates: [],
+        slashCommands: [],
+        hasUI: false,
+        autoApprove: true,
+      });
+
+      try {
+        await session.setModel(model);
+        const fullPrompt = buildResearchParticipantPrompt(p, researchPrompt, intensity);
+        await session.prompt(fullPrompt, { expandPromptTemplates: false });
+
+        if (signal?.aborted) {
+          throw new Error("Aborted");
+        }
+
+        const entries = session.sessionManager.getEntries();
+        let lastAssistant: AssistantMessage | undefined;
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entry = entries[i];
+          if (isMessageEntry(entry) && entry.message.role === "assistant") {
+            lastAssistant = entry.message as AssistantMessage;
+            break;
+          }
+        }
+
+        if (lastAssistant) {
+          const msg = lastAssistant;
+          if (msg.stopReason === "error" && msg.errorMessage) {
+            throw new Error(msg.errorMessage);
+          }
+          result.text = truncateOutput(extractAssistantText(msg), options.maxChars ?? DEFAULT_MAX_CHARS);
+        }
+      } finally {
+        await session.dispose();
+      }
+    } catch (err) {
+      result.error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
+    }
+    return result;
+  });
+
+  return Promise.all(promises);
+}
+
+export function buildResearchParticipantPrompt(
+  participant: Participant,
+  researchPrompt: string,
+  intensity: "quick" | "standard" | "deep",
+): string {
+  const userPrompt = participant.prompt ?? researchPrompt;
+  return `You are an isolated participant in a multi-model sourced research session. You may use only read-only research tools: web_search and read. Do not write files, edit files, execute shell commands, run tasks, mutate state, or ask clarifying questions.
+
+Role: ${participant.role}
+Research intensity: ${intensity}
+
+Research brief:
+${userPrompt}
+
+Requirements:
+- Cite source URLs for factual claims.
+- Mark any conclusion that is not directly source-backed as [Inference].
+- Label model judgment as provider opinion when appropriate.
+- Report disagreements between sources, uncertainty, stale evidence, and gaps where sources were insufficient.
+- Prefer primary sources and official documentation when available.
+- Return concise markdown with sections: Findings, Sources, Disagreements & Gaps.`;
 }
 
 export function buildParticipantPrompt(

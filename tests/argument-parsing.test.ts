@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseCommandArgs, parseModelsFlag } from "../src/arguments";
+import { mapBreadthToIntensity, parseCommandArgs, parseModelsFlag, parseResearchArgs } from "../src/arguments";
 
 describe("parseCommandArgs", () => {
   it("parses topic only", () => {
@@ -51,6 +51,52 @@ describe("parseCommandArgs", () => {
   });
 });
 
+
+describe("parseResearchArgs", () => {
+  it("parses research topic and models", () => {
+    const result = parseResearchArgs(
+      "--models=openai/gpt-5,anthropic/claude-sonnet Effects of AI on radiology",
+    );
+    expect(result.topic).toBe("Effects of AI on radiology");
+    expect(result.modelsFlag).toBe("openai/gpt-5,anthropic/claude-sonnet");
+  });
+
+  it("maps breadth to effective intensity", () => {
+    expect(parseResearchArgs("--breadth=light Topic").effectiveIntensity).toBe("quick");
+    expect(parseResearchArgs("--breadth standard Topic").effectiveIntensity).toBe("standard");
+    expect(parseResearchArgs("--breadth=exhaustive Topic").effectiveIntensity).toBe("deep");
+  });
+
+  it("lets explicit intensity win over breadth", () => {
+    const result = parseResearchArgs("--breadth=exhaustive --intensity=quick Topic");
+    expect(result.breadth).toBe("exhaustive");
+    expect(result.intensity).toBe("quick");
+    expect(result.effectiveIntensity).toBe("quick");
+  });
+
+  it("supports space-form intensity", () => {
+    const result = parseResearchArgs("--intensity deep Topic");
+    expect(result.topic).toBe("Topic");
+    expect(result.effectiveIntensity).toBe("deep");
+  });
+
+  it("returns undefined effective intensity when no intensity flags are present", () => {
+    expect(parseResearchArgs("Topic").effectiveIntensity).toBeUndefined();
+  });
+
+  it("rejects invalid breadth and intensity", () => {
+    expect(() => parseResearchArgs("--breadth=wide Topic")).toThrow("--breadth");
+    expect(() => parseResearchArgs("--intensity=slow Topic")).toThrow("--intensity");
+  });
+});
+
+describe("mapBreadthToIntensity", () => {
+  it("maps every breadth value", () => {
+    expect(mapBreadthToIntensity("light")).toBe("quick");
+    expect(mapBreadthToIntensity("standard")).toBe("standard");
+    expect(mapBreadthToIntensity("exhaustive")).toBe("deep");
+  });
+});
 describe("parseModelsFlag", () => {
   it("splits comma-separated selectors", () => {
     expect(parseModelsFlag("a/b,c/d")).toEqual(["a/b", "c/d"]);
