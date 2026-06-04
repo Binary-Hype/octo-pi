@@ -30,6 +30,16 @@ export interface ResearchRoundOptions {
   maxChars?: number;
 }
 
+interface ParticipantSessionOptions {
+  modelRegistry: ModelRegistry;
+  authStorage: AuthStorage;
+  signal: AbortSignal | undefined;
+  maxChars: number;
+  createPrompt: (participant: Participant) => string;
+  toolNames: string[];
+  autoApprove: boolean;
+}
+
 const DEFAULT_MAX_CHARS = 4000;
 const SECRET_REPLACEMENT = "[REDACTED]";
 
@@ -46,76 +56,22 @@ export async function runMultiModelRound(
   signal: AbortSignal | undefined,
   options: RoundOptions = {},
 ): Promise<RoundResult[]> {
-  if (signal?.aborted) {
-    throw new Error("Aborted");
-  }
+  const uniqueParticipants = validateParticipants(participants, signal);
+  const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
 
-  const uniqueParticipants = deduplicateParticipants(participants);
-  for (const participant of uniqueParticipants) {
-    validateModelSelector(participant.model);
-  }
-
-  const promises = uniqueParticipants.map(async (p): Promise<RoundResult> => {
-    const result: RoundResult = { model: p.model, role: p.role, text: "" };
-    try {
-      const model = modelRegistry.find(...parseSelector(p.model));
-      if (!model) {
-        throw new Error(`Model not found: ${p.model}`);
-      }
-
-      const { session } = await createAgentSession({
-        sessionManager: SessionManager.inMemory(),
+  return Promise.all(
+    uniqueParticipants.map((participant) =>
+      runParticipantSession(participant, {
         modelRegistry,
         authStorage,
-        disableExtensionDiscovery: true,
-        enableMCP: false,
-        enableLsp: false,
+        signal,
+        maxChars,
         toolNames: [],
-        skills: [],
-        rules: [],
-        contextFiles: [],
-        promptTemplates: [],
-        slashCommands: [],
-        hasUI: false,
         autoApprove: false,
-      });
-
-      try {
-        await session.setModel(model);
-        const fullPrompt = buildParticipantPrompt(p, roundPrompt, mode, options.priorSummary);
-        await session.prompt(fullPrompt, { expandPromptTemplates: false });
-
-        if (signal?.aborted) {
-          throw new Error("Aborted");
-        }
-
-        const entries = session.sessionManager.getEntries();
-        let lastAssistant: AssistantMessage | undefined;
-        for (let i = entries.length - 1; i >= 0; i--) {
-          const entry = entries[i];
-          if (isMessageEntry(entry) && entry.message.role === "assistant") {
-            lastAssistant = entry.message as AssistantMessage;
-            break;
-          }
-        }
-
-        if (lastAssistant) {
-          const msg = lastAssistant;
-          if (msg.stopReason === "error" && msg.errorMessage) {
-            throw new Error(msg.errorMessage);
-          }
-          result.text = truncateOutput(extractAssistantText(msg), options.maxChars ?? DEFAULT_MAX_CHARS);
-        }
-      } finally {
-        await session.dispose();
-      }
-    } catch (err) {
-      result.error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    }
-    return result;
-  });
-
-  return Promise.all(promises);
+        createPrompt: (p) => buildParticipantPrompt(p, roundPrompt, mode, options.priorSummary),
+      }),
+    ),
+  );
 }
 
 export async function runResearchRound(
@@ -127,76 +83,22 @@ export async function runResearchRound(
   signal: AbortSignal | undefined,
   options: ResearchRoundOptions = {},
 ): Promise<RoundResult[]> {
-  if (signal?.aborted) {
-    throw new Error("Aborted");
-  }
+  const uniqueParticipants = validateParticipants(participants, signal);
+  const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
 
-  const uniqueParticipants = deduplicateParticipants(participants);
-  for (const participant of uniqueParticipants) {
-    validateModelSelector(participant.model);
-  }
-
-  const promises = uniqueParticipants.map(async (p): Promise<RoundResult> => {
-    const result: RoundResult = { model: p.model, role: p.role, text: "" };
-    try {
-      const model = modelRegistry.find(...parseSelector(p.model));
-      if (!model) {
-        throw new Error(`Model not found: ${p.model}`);
-      }
-
-      const { session } = await createAgentSession({
-        sessionManager: SessionManager.inMemory(),
+  return Promise.all(
+    uniqueParticipants.map((participant) =>
+      runParticipantSession(participant, {
         modelRegistry,
         authStorage,
-        disableExtensionDiscovery: true,
-        enableMCP: false,
-        enableLsp: false,
+        signal,
+        maxChars,
         toolNames: ["web_search", "read"],
-        skills: [],
-        rules: [],
-        contextFiles: [],
-        promptTemplates: [],
-        slashCommands: [],
-        hasUI: false,
         autoApprove: true,
-      });
-
-      try {
-        await session.setModel(model);
-        const fullPrompt = buildResearchParticipantPrompt(p, researchPrompt, intensity);
-        await session.prompt(fullPrompt, { expandPromptTemplates: false });
-
-        if (signal?.aborted) {
-          throw new Error("Aborted");
-        }
-
-        const entries = session.sessionManager.getEntries();
-        let lastAssistant: AssistantMessage | undefined;
-        for (let i = entries.length - 1; i >= 0; i--) {
-          const entry = entries[i];
-          if (isMessageEntry(entry) && entry.message.role === "assistant") {
-            lastAssistant = entry.message as AssistantMessage;
-            break;
-          }
-        }
-
-        if (lastAssistant) {
-          const msg = lastAssistant;
-          if (msg.stopReason === "error" && msg.errorMessage) {
-            throw new Error(msg.errorMessage);
-          }
-          result.text = truncateOutput(extractAssistantText(msg), options.maxChars ?? DEFAULT_MAX_CHARS);
-        }
-      } finally {
-        await session.dispose();
-      }
-    } catch (err) {
-      result.error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    }
-    return result;
-  });
-
-  return Promise.all(promises);
+        createPrompt: (p) => buildResearchParticipantPrompt(p, researchPrompt, intensity),
+      }),
+    ),
+  );
 }
 
 export function buildResearchParticipantPrompt(
@@ -254,6 +156,80 @@ export function validateModelSelector(selector: string): void {
   if (!/^[^\s/]+\/[^\s/]+$/.test(selector)) {
     throw new Error(`Invalid model selector: ${selector}`);
   }
+}
+
+function validateParticipants(participants: Participant[], signal: AbortSignal | undefined): Participant[] {
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  const uniqueParticipants = deduplicateParticipants(participants);
+  for (const participant of uniqueParticipants) {
+    validateModelSelector(participant.model);
+  }
+  return uniqueParticipants;
+}
+
+async function runParticipantSession(
+  participant: Participant,
+  options: ParticipantSessionOptions,
+): Promise<RoundResult> {
+  const result: RoundResult = { model: participant.model, role: participant.role, text: "" };
+  try {
+    const model = options.modelRegistry.find(...parseSelector(participant.model));
+    if (!model) {
+      throw new Error(`Model not found: ${participant.model}`);
+    }
+
+    const { session } = await createAgentSession({
+      sessionManager: SessionManager.inMemory(),
+      modelRegistry: options.modelRegistry,
+      authStorage: options.authStorage,
+      disableExtensionDiscovery: true,
+      enableMCP: false,
+      enableLsp: false,
+      toolNames: options.toolNames,
+      skills: [],
+      rules: [],
+      contextFiles: [],
+      promptTemplates: [],
+      slashCommands: [],
+      hasUI: false,
+      autoApprove: options.autoApprove,
+    });
+
+    try {
+      await session.setModel(model);
+      await session.prompt(options.createPrompt(participant), { expandPromptTemplates: false });
+
+      if (options.signal?.aborted) {
+        throw new Error("Aborted");
+      }
+
+      const lastAssistant = findLastAssistantMessage(session.sessionManager.getEntries());
+      if (lastAssistant) {
+        if (lastAssistant.stopReason === "error" && lastAssistant.errorMessage) {
+          throw new Error(lastAssistant.errorMessage);
+        }
+        result.text = truncateOutput(extractAssistantText(lastAssistant), options.maxChars);
+      }
+    } finally {
+      await session.dispose();
+    }
+  } catch (err) {
+    result.error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
+  }
+  return result;
+}
+
+function findLastAssistantMessage(entries: SessionEntry[]): AssistantMessage | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (isMessageEntry(entry) && entry.message.role === "assistant") {
+      return entry.message as AssistantMessage;
+    }
+  }
+  return undefined;
 }
 
 function parseSelector(selector: string): [string, string] {
