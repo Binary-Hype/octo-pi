@@ -5,8 +5,8 @@ import type {
   SessionEntry,
   SessionMessageEntry,
 } from "@oh-my-pi/pi-coding-agent";
-import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import { extractAssistantText } from "./text.js";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { extractAssistantText, truncateOutput } from "./text.js";
 
 export interface Participant {
   model: string;
@@ -21,6 +21,14 @@ export interface RoundResult {
   error?: string;
 }
 
+export interface RoundOptions {
+  priorSummary?: string;
+  maxChars?: number;
+}
+
+const DEFAULT_MAX_CHARS = 4000;
+const SECRET_REPLACEMENT = "[REDACTED]";
+
 function isMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
   return entry.type === "message";
 }
@@ -32,12 +40,18 @@ export async function runMultiModelRound(
   modelRegistry: ModelRegistry,
   authStorage: AuthStorage,
   signal: AbortSignal | undefined,
+  options: RoundOptions = {},
 ): Promise<RoundResult[]> {
   if (signal?.aborted) {
     throw new Error("Aborted");
   }
 
-  const promises = participants.map(async (p): Promise<RoundResult> => {
+  const uniqueParticipants = deduplicateParticipants(participants);
+  for (const participant of uniqueParticipants) {
+    validateModelSelector(participant.model);
+  }
+
+  const promises = uniqueParticipants.map(async (p): Promise<RoundResult> => {
     const result: RoundResult = { model: p.model, role: p.role, text: "" };
     try {
       const model = modelRegistry.find(...parseSelector(p.model));
@@ -64,8 +78,7 @@ export async function runMultiModelRound(
 
       try {
         await session.setModel(model);
-        const userPrompt = p.prompt ?? roundPrompt;
-        const fullPrompt = `You are an isolated participant in a multi-model ${mode} session. You have no tools, no file access, and no external capabilities. Answer the prompt below directly and concisely. Do not ask clarifying questions. Do not mention that you are an AI.\n\nRole: ${p.role}\n\n${userPrompt}`;
+        const fullPrompt = buildParticipantPrompt(p, roundPrompt, mode, options.priorSummary);
         await session.prompt(fullPrompt, { expandPromptTemplates: false });
 
         if (signal?.aborted) {
@@ -87,13 +100,13 @@ export async function runMultiModelRound(
           if (msg.stopReason === "error" && msg.errorMessage) {
             throw new Error(msg.errorMessage);
           }
-          result.text = extractAssistantText(msg);
+          result.text = truncateOutput(extractAssistantText(msg), options.maxChars ?? DEFAULT_MAX_CHARS);
         }
       } finally {
         await session.dispose();
       }
     } catch (err) {
-      result.error = err instanceof Error ? err.message : String(err);
+      result.error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
     }
     return result;
   });
@@ -101,8 +114,42 @@ export async function runMultiModelRound(
   return Promise.all(promises);
 }
 
+export function buildParticipantPrompt(
+  participant: Participant,
+  roundPrompt: string,
+  mode: "debate" | "brainstorm",
+  priorSummary?: string,
+): string {
+  const userPrompt = participant.prompt ?? roundPrompt;
+  const prior = priorSummary ? `\n\nPrior round synthesis:\n${priorSummary}` : "";
+  return `You are an isolated participant in a multi-model ${mode} session. You have no tools, no file access, no skills, no external lookups, and no external capabilities. Answer the prompt below directly and concisely. Do not ask clarifying questions. Do not mention that you are an AI.\n\nRole: ${participant.role}${prior}\n\nPrompt:\n${userPrompt}`;
+}
+
+export function deduplicateParticipants(participants: Participant[]): Participant[] {
+  const seen = new Set<string>();
+  const deduped: Participant[] = [];
+  for (const participant of participants) {
+    if (seen.has(participant.model)) continue;
+    seen.add(participant.model);
+    deduped.push(participant);
+  }
+  return deduped;
+}
+
+export function sanitizeErrorMessage(message: string): string {
+  return message
+    .replace(/\b([A-Za-z0-9_]*key|token|secret|password|credential)(=|:)\s*([^\s"'`,;]+)/gi, `$1$2 ${SECRET_REPLACEMENT}`)
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{24,})\b/g, SECRET_REPLACEMENT);
+}
+
+export function validateModelSelector(selector: string): void {
+  if (!/^[^\s/]+\/[^\s/]+$/.test(selector)) {
+    throw new Error(`Invalid model selector: ${selector}`);
+  }
+}
+
 function parseSelector(selector: string): [string, string] {
+  validateModelSelector(selector);
   const slashIdx = selector.indexOf("/");
-  if (slashIdx === -1) throw new Error(`Invalid model selector: ${selector}`);
   return [selector.slice(0, slashIdx), selector.slice(slashIdx + 1)];
 }

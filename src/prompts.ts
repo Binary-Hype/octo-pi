@@ -2,8 +2,9 @@ export function orchestratorKickoffPrompt(opts: {
   mode: "debate" | "brainstorm";
   topic: string;
   selectedModels: string[];
+  maxRounds: number;
 }): string {
-  const { mode, topic, selectedModels } = opts;
+  const { mode, topic, selectedModels, maxRounds } = opts;
   const rolePalette =
     mode === "debate"
       ? `Possible debate roles (assign one per model):
@@ -54,11 +55,12 @@ Now call the tool \`octopus_multi_model_round\` with:
 - round: 1
 - participants: array of { model, role, prompt? } for each selected model
 - roundPrompt: the shared prompt you crafted
+- priorSummary: omit for round 1; for rounds greater than 1, include a concise synthesis of earlier rounds
 
 ${synthesisContract}
 
-Then call \`octopus_next_step\` with your synthesis summary.
+Then call \`octopus_next_step\` with your synthesis summary and, when useful, a recommendedNextPrompt.
 
-If \`octopus_next_step\` returns selected models, run another round with \`octopus_multi_model_round\` using the next round number.
-If it returns "continue_orchestrator", answer the user's question directly using your synthesis.`;
+The configured round limit is ${maxRounds}. If \`octopus_next_step\` returns selected models and the next round number is ${maxRounds} or lower, run another round with \`octopus_multi_model_round\` using the next round number and a concise priorSummary. If the next round would exceed ${maxRounds}, answer the user's question directly using your synthesis instead.
+If \`octopus_next_step\` returns "continue_orchestrator", answer the user's question directly using your synthesis.`;
 }

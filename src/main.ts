@@ -6,7 +6,13 @@ import { parseModelsFlag } from "./arguments.js";
 import { orchestratorKickoffPrompt } from "./prompts.js";
 import { runMultiModelRound } from "./subagents.js";
 
-const selectedModelsBySession = new Map<string, string[]>();
+interface SessionMetadata {
+  selectedModels: string[];
+  maxRounds: number;
+  lastRound: number;
+}
+
+const sessionMetadata = new Map<string, SessionMetadata>();
 
 export default function (pi: ExtensionAPI) {
   const { z } = pi.zod;
@@ -50,16 +56,22 @@ export default function (pi: ExtensionAPI) {
       onUpdate?.({ content: [{ type: "text", text: "Dispatching to participant models..." }] });
 
       const sessionId = ctx.sessionManager.getSessionId();
-      const stored = selectedModelsBySession.get(sessionId);
+      const stored = sessionMetadata.get(sessionId);
       const selectors = params.participants.map((p) => p.model);
       if (stored) {
+        if (params.round > stored.maxRounds) {
+          throw new Error(
+            `Round ${params.round} exceeds the configured limit of ${stored.maxRounds}. Continue with the orchestrator.`,
+          );
+        }
         for (const sel of selectors) {
-          if (!stored.includes(sel)) {
+          if (!stored.selectedModels.includes(sel)) {
             throw new Error(
-              `Model ${sel} was not selected for this session. Available: ${stored.join(", ")}`,
+              `Model ${sel} was not selected for this session. Available: ${stored.selectedModels.join(", ")}`,
             );
           }
         }
+        stored.lastRound = Math.max(stored.lastRound, params.round);
       }
 
       const results = await runMultiModelRound(
@@ -69,11 +81,12 @@ export default function (pi: ExtensionAPI) {
         ctx.modelRegistry,
         ctx.modelRegistry.authStorage,
         signal,
+        { priorSummary: params.priorSummary },
       );
 
       const lines: string[] = [];
       for (const r of results) {
-        lines.push(`### ${r.model} (${r.role})`);
+        lines.push(`### ${r.model} — ${r.role}`);
         if (r.error) {
           lines.push(`Error: ${r.error}`);
         } else {
@@ -101,30 +114,47 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!ctx.hasUI) {
+        const sessionId = ctx.sessionManager.getSessionId();
+        sessionMetadata.delete(sessionId);
         return {
           content: [{ type: "text", text: "continue_orchestrator" }],
           details: { action: "continue_orchestrator" },
         };
       }
 
-      const choice = await ctx.ui.select("Run another multi-model round?", [
+      const prompt = params.recommendedNextPrompt
+        ? `Run another multi-model round?\n\nRecommended next prompt:\n${params.recommendedNextPrompt}`
+        : "Run another multi-model round?";
+      const choice = await ctx.ui.select(prompt, [
         "Another round with multiple models",
         "Continue only with orchestrator",
       ]);
 
       if (choice === "Another round with multiple models") {
         const sessionId = ctx.sessionManager.getSessionId();
-        const stored = selectedModelsBySession.get(sessionId) ?? [];
-        const available = ctx.modelRegistry.getAvailable();
-        const items = buildModelItems(available, ctx.model);
-        const selected = await multiSelectModels(items, new Set(stored), ctx);
-        if (!selected || selected.length < 2) {
+        const stored = sessionMetadata.get(sessionId);
+        if (stored && stored.lastRound >= stored.maxRounds) {
+          sessionMetadata.delete(sessionId);
           return {
             content: [{ type: "text", text: "continue_orchestrator" }],
             details: { action: "continue_orchestrator" },
           };
         }
-        selectedModelsBySession.set(sessionId, selected);
+        const available = ctx.modelRegistry.getAvailable();
+        const items = buildModelItems(available, ctx.model);
+        const selected = await multiSelectModels(items, new Set(stored?.selectedModels ?? []), ctx);
+        if (!selected || selected.length < 2) {
+          sessionMetadata.delete(sessionId);
+          return {
+            content: [{ type: "text", text: "continue_orchestrator" }],
+            details: { action: "continue_orchestrator" },
+          };
+        }
+        sessionMetadata.set(sessionId, {
+          selectedModels: selected,
+          maxRounds: stored?.maxRounds ?? 3,
+          lastRound: stored?.lastRound ?? 0,
+        });
         return {
           content: [
             { type: "text", text: `Selected models for next round: ${selected.join(", ")}` },
@@ -133,6 +163,8 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
+      const sessionId = ctx.sessionManager.getSessionId();
+      sessionMetadata.delete(sessionId);
       return {
         content: [{ type: "text", text: "continue_orchestrator" }],
         details: { action: "continue_orchestrator" },
@@ -147,7 +179,7 @@ async function handleCommand(
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
 ) {
-  const { topic, modelsFlag } = parseCommandArgs(args);
+  const { topic, modelsFlag, maxRounds } = parseCommandArgs(args);
 
   let actualTopic = topic;
   if (!actualTopic) {
@@ -186,8 +218,13 @@ async function handleCommand(
   }
 
   const sessionId = ctx.sessionManager.getSessionId();
-  selectedModelsBySession.set(sessionId, selected);
+  sessionMetadata.set(sessionId, { selectedModels: selected, maxRounds, lastRound: 0 });
 
-  const prompt = orchestratorKickoffPrompt({ mode, topic: actualTopic, selectedModels: selected });
+  const prompt = orchestratorKickoffPrompt({
+    mode,
+    topic: actualTopic,
+    selectedModels: selected,
+    maxRounds,
+  });
   pi.sendUserMessage(prompt);
 }
