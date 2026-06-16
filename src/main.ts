@@ -28,7 +28,9 @@ interface TopicAndModels {
 
 const sessionMetadata = new Map<string, SessionMetadata>();
 
-export default function (pi: ExtensionAPI) {
+export default function octoPi(pi: ExtensionAPI) {
+  pi.setLabel("Octo-Pi");
+
   const { z } = pi.zod;
 
   registerCommands(pi);

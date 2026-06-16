@@ -11,5 +11,5 @@
     "rootDir": ".",
     "types": ["bun"]
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["extensions/**/*", "src/**/*", "tests/**/*"]
 }

@@ -70,6 +70,9 @@ bun run typecheck
 ## Project structure
 
 ```text
+extensions/
+  index.ts            OMP extension entrypoint
+
 src/
   arguments.ts        Command argument, --models, and research flag parsing
   main.ts             Extension registration, commands, and tools
@@ -81,6 +84,7 @@ src/
 tests/
   argument-parsing.test.ts
   model-selection.test.ts
+  extension-entrypoint.test.ts
   prompt-contract.test.ts
   subagents.test.ts
   text.test.ts
@@ -98,7 +102,7 @@ tests/
 ```json
 {
   "omp": {
-    "extensions": ["./src/main.ts"]
+    "extensions": ["./extensions/index.ts"]
   }
 }
 ```
