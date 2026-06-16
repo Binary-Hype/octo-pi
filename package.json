@@ -13,12 +13,12 @@
     ]
   },
   "peerDependencies": {
-    "@oh-my-pi/pi-coding-agent": "^15.8.0",
-    "@oh-my-pi/pi-tui": "^15.8.0"
+    "@oh-my-pi/pi-coding-agent": ">=15.8.0 <17.0.0",
+    "@oh-my-pi/pi-tui": ">=15.8.0 <17.0.0"
   },
   "devDependencies": {
-    "@oh-my-pi/pi-coding-agent": "^15.8.0",
-    "@oh-my-pi/pi-tui": "^15.8.0",
+    "@oh-my-pi/pi-coding-agent": "^16.0.1",
+    "@oh-my-pi/pi-tui": "^16.0.1",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   }

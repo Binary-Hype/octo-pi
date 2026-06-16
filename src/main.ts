@@ -31,7 +31,7 @@ const sessionMetadata = new Map<string, SessionMetadata>();
 export default function octoPi(pi: ExtensionAPI) {
   pi.setLabel("Octo-Pi");
 
-  const { z } = pi.zod;
+  const z = pi.zod;
 
   registerCommands(pi);
   registerMultiModelRoundTool();
